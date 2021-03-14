@@ -1,15 +1,18 @@
 import tensorflow as tf
 from transformers import BertTokenizer #该类实现数据的token化
-from transformers import TFBertForSequenceClassification
+from transformers import TFBertModel
+from transformers import BartConfig
 import os
 import pandas as pd
 import numpy as np
 from PIL import Image
+from PIL import ImageFile
 
 
-max_sentence_length = 40 #定义句子最大的长度
+max_sentence_length = 128 #定义句子最大的长度
 label_path = 'D:\code\\bert\word_data2\labelResultAll.txt'
-data_dir_path = 'D:\code\\bert\word_data2\data'
+img_dir_path = 'D:\code\\bert\word_data2\data\pic'
+text_dir_path = 'D:\code\\bert\word_data2\data'
 number_of_epochs = 8 #训练循环次数
 learning_rate = 2e-5 #学习率
 
@@ -62,20 +65,50 @@ def get_bert_input_V2(sentence,max_sentence_length):
 
 
 ###########################################数据集处理模块################################################
+
+
+def resize_image(id_use):
+    # 获取输入文件夹中的所有文件
+    files = os.listdir("D:\code\\bert\word_data2\data")
+
+    output_dir = "D:\code\\bert\word_data2\data\pic"
+    # 判断输出文件夹是否存在，不存在则创建
+    ImageFile.LOAD_TRUNCATED_IMAGES = True
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+
+    for file in id_use:
+        img = Image.open("D:\code\\bert\word_data2\data\\"+ file + '.jpg')
+        if img.mode == "P":
+            img = img.convert('RGB')
+        if img.mode == "RGBA":
+            img = img.convert('RGB')
+        img = img.resize((640, 480), Image.ANTIALIAS)
+        img.save(os.path.join(output_dir, file +'.jpg'))
+
+    print('图片输出完成')
+
+
+
+
+
 def get_label(label_path):
     pre_train_label = pd.read_csv(label_path,sep="\t",header=None,encoding="gbk")
     df = pd.DataFrame(pre_train_label)
     text_label = []
     image_label = []
+    real_id_use=[]
 
     flag = []
     id_use = []
     id_unuse = []
     id_idx_unuse = []
 
+    df2 = df[1].str.split(',',expand=True)
+
     #遍历整个行，一共有19600条数据
     for i in range(1,19600):
-        if(pre_train_label[1][i] == pre_train_label[2][i] or pre_train_label[1][i] == pre_train_label[3][i] or pre_train_label[2][i] == pre_train_label[3][i]):
+        if(pre_train_label[1][i] == pre_train_label[2][i] or pre_train_label[1][i] == pre_train_label[3][i] or pre_train_label[2][i] == pre_train_label[3][i]) :
             flag.append(1)#相同的可以
             id_use.append(pre_train_label[0][i])#将可以用的id保存起来
         else:
@@ -90,6 +123,7 @@ def get_label(label_path):
     df2 = df[1].str.split(',',expand=True)
     pre_image_label = df2[[1]]
     pre_text_label = df2[[0]]
+
     i = np.array(pre_image_label).tolist()
     t = np.array(pre_text_label).tolist()
     for j in range(1,len(i)):
@@ -104,10 +138,10 @@ def get_label(label_path):
     return text_label,image_label,id_use
 
 
-def convert_label(text_label,image_lable,id_use):
+def convert_label(text_label,image_label,id_use):
     #positive=[1,0],neutral=[0,0],negative=[0,1]
     convert_text_label=[]
-    convert_image_lable=[]
+    convert_image_label=[]
     for i in text_label:
         if i == 'positive':
             convert_text_label.append([1,0,0])
@@ -115,28 +149,28 @@ def convert_label(text_label,image_lable,id_use):
             convert_text_label.append([0,1,0])
         elif i == 'negative':
             convert_text_label.append([0,0,1])
-    for j in image_lable:
+    for j in image_label:
         if j == 'positive':
-            convert_image_lable.append([1,0,0])
+            convert_image_label.append([1,0,0])
         elif j == 'neutral':
-            convert_image_lable.append([0,1,0])
+            convert_image_label.append([0,1,0])
         elif j == 'negative':
-           convert_image_lable.append([0,0,1])
+           convert_image_label.append([0,0,1])
 
-    print(convert_image_lable[1:10])
-    print(convert_text_label[1:10])
+    #print(convert_image_label[1:10])
+   # print(convert_text_label[1:10])
 
-    return convert_text_label,convert_image_lable,id_use
+    return convert_text_label,convert_image_label,id_use
     
 
 
-def get_train_data(data_dir_path,id_use):
+def get_train_data(img_dir_path,id_use,text_dir_path):
     text = []
     image = []
 
     for id in id_use:
         id = id + '.txt'
-        domain = os.path.abspath(data_dir_path)#获取文件夹的路径
+        domain = os.path.abspath(text_dir_path)#获取文件夹的路径
         info = os.path.join(domain,id)#将路径与文件名结合起来就是每个文件的完整路径
         info = open(info,'r',encoding='utf-8')#读取文件内容
         text.append(info.readline())#使用readline函数得到一条一条的信息，如果使用read获取全部信息亦可；
@@ -144,14 +178,12 @@ def get_train_data(data_dir_path,id_use):
 
     for id in id_use:
         id = id + '.jpg'
-        domain = os.path.abspath(data_dir_path)#获取文件夹的路径
+        domain = os.path.abspath(img_dir_path)#获取文件夹的路径
 
         info = os.path.join(domain,id)#将路径与文件名结合起来就是每个文件的完整路径
         img = np.array(Image.open(info))#读取图片内容
         image.append(img)
-    image = np.array(image)
     return image,text #text是一个文字数组，image是np存储的数组
-
 
 def convert_example_to_feature(text):
     input_ids_list = []
@@ -165,29 +197,14 @@ def convert_example_to_feature(text):
         attention_mask_list.append(bert_input['attention_mask'])
     return input_ids_list,token_type_ids_list,attention_mask_list
 
-model = TFBertForSequenceClassification.from_pretrained('bert-base-uncased',num_labels = 3)
 
 
-def bert_model():
-
-    model = TFBertForSequenceClassification.from_pretrained('bert-base-uncased',num_labels = 3)
-    model.get
-    
-    
-
-    
-
-    
-    
-    print(model.get_output_embeddings().shape)
-
-    optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate,epsilon=1e-08, clipnorm=1)
-
-    
-    loss = tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True)
-    metric = tf.keras.metrics.SparseCategoricalAccuracy('accuracy')
-    model.compile(optimizer=optimizer, loss=loss, metrics=[metric])
-    bert_history = model.fit(ds_train_encoded, epochs=number_of_epochs, validation_data=ds_val_encoded)
+def map_example_to_dict(input_ids, attention_masks, token_type_ids, label):
+    return {
+      "input_ids": input_ids,
+      "token_type_ids": token_type_ids,
+      "attention_mask": attention_masks,
+  }, label
 
 
 
@@ -230,7 +247,9 @@ def maxpooling(input, name, kh, kw, dh, dw):
                           name=name)
 
 
-def cnn_model(input,keep_prob):#keep_prob为dropout设置的参数，可以为一个全局变量
+
+
+def cnn_model(input,keep_prob,bert_output):#keep_prob为dropout设置的参数，可以为一个全局变量
     with tf.variable_scope('conv_1_1'):
         conv1_1 = conv(input, name="conv1_1", kh=3, kw=3, n_out=64, dh=1, dw=1)
     with tf.variable_scope('conv_1_2'):
@@ -265,8 +284,10 @@ def cnn_model(input,keep_prob):#keep_prob为dropout设置的参数，可以为�
     with tf.variable_scope('pool_4'):
         pool4 = maxpooling(conv4_3,name="pool4", kh=2, kw=2, dh=2, dw=2)
 
+
+
     with tf.variable_scope('conv_5_1'):
-        conv5_1 = conv(pool4,name="conv5_1", kh=3, kw=3, n_out=512, dh=1, dw=1)
+        conv5_1 = conv(mix1,name="conv5_1", kh=3, kw=3, n_out=512, dh=1, dw=1)
     with tf.variable_scope('conv_5_2'):
         conv5_2 = conv(conv5_1,  name="conv5_2", kh=3, kw=3, n_out=512, dh=1, dw=1)
     with tf.variable_scope('conv_5_3'):
@@ -275,22 +296,103 @@ def cnn_model(input,keep_prob):#keep_prob为dropout设置的参数，可以为�
         pool5 = maxpooling(conv5_3, name="pool5", kh=2, kw=2, dw=2, dh=2)
 
 
-
     with tf.variable_scope('gap'):#根据论文实现GAP替代全连接层实现分类
-        GAP = tf.nn.avg_pool2d(pool5 ,ksize=[1,pool5.get_shape().as_list()[1],pool5.get_shape().as_list()[1],1],strides=[1,1,1,1],padding='VALID',name='GAP')
+        GAP = tf.nn.avg_pool2d(mix2 ,ksize=[1,pool5.get_shape().as_list()[1],pool5.get_shape().as_list()[1],1],strides=[1,1,1,1],padding='VALID',name='GAP')
 
-    with tf.variable_scope('fully_connect_1'):#全连接层1实现512到100
-        linear1 = linear(GAP, name="linear1", n_out=100)
+    with tf.variable_scope('fully_connect_1'):#全连接层1实现512到100,512加上词的output实现拼接
+       
+        linear1 = linear(tf.concat(GAP,bert_output), name="linear1", n_out=100)
         linear1_drop = tf.nn.dropout(linear1, keep_prob, name="linear1_drop")
 
     with tf.variable_scope('fully_connect_2'):#全连接层2实现100到3，实现情绪的分类
-        linear2 = linear(linear1_drop, name="linear2", n_out=3)
+        linear2 = linear(tf.concat(linear1_drop,bert_output), name="linear2", n_out=50)
         linear2_drop = tf.nn.dropout(linear2, keep_prob, name="linear2_drop")
 
+    with tf.variable_scope('fully_connect_3'):#全连接层3实现50到3，实现情绪的分类
+        linear3 = linear(tf.concat(linear2_drop,bert_output), name="linear3", n_out=3)
+        linear3_drop = tf.nn.dropout(linear3, keep_prob, name="linear3_drop")
 
-text_label,image_label,id_use =  get_label(label_path)
+    with tf.variable_scope('ouput'):
+        softmax = tf.nn.softmax(linear3_drop)
 
-get_train_data(data_dir_path,id_use)
+    return(softmax)
+
+
+
+def run_benchmark():
+    with tf.compat.v1.Graph().as_default():
+        image_size = 224
+        pic_= tf.compat.v1.placeholder([batch_size,480,640,3], dtype=tf.float32,stddev=1e-1,name='real_images')
+
+        bert_output = tf.compat.v1.placeholder([batch_size,max_sentence_length,1], dtype=tf.float32,stddev=1e-1,name='real_text')
+
+        softmax = cnn_model(images, keep_prob,bert_output)
+
+        init = tf.global_variables_initializer()
+
+        config = tf.ConfigProto()
+        config.gpu_options.allocator_type = 'BFC'
+        sess = tf.Session(config=config)
+        sess.run(init)
+
+        time_tensorflow_run(sess, predictions, {keep_prob:1.0}, "Forward")
+
+        objective = tf.nn.l2_loss(fc8)
+        grad = tf.gradients(objective, p)
+        time_tensorflow_run(sess, grad, {keep_prob:0.5}, "Forward-backward")
+
+
+def time_tensorflow_run(session, target, feed, info_string):
+    num_steps_burn_in = 10
+    total_duration = 0.0
+    total_duration_squared = 0.0
+    for i in range(num_batches + num_steps_burn_in):
+        start_time = time.time()
+        _ = session.run(target, feed_dict=feed)
+        duration = time.time() - start_time
+        if i >= num_steps_burn_in:
+            if not i % 10:
+                print ('%s: step %d, duration = %.3f' %
+                       (datetime.now(), i - num_steps_burn_in, duration))
+            total_duration += duration
+            total_duration_squared += duration * duration
+    mn = total_duration / num_batches
+    vr = total_duration_squared / num_batches - mn * mn
+    sd = math.sqrt(vr)
+    print ('%s: %s across %d steps, %.3f +/- %.3f sec / batch' %
+           (datetime.now(), info_string, num_batches, mn, sd))
+
+
+def bert_model(text,label):
+#配置模型#
+    model_config.output_hidden_states = True
+    model_config.output_attentions = True
+
+
+    text_label,image_label,id_use =  get_label(label_path)#得到文档标签，图像标签（没什么用），还有可以用的id
+    
+    img , text = get_train_data(img_dir_path,id_use,text_dir_path)#得到需要训练的文档，和图片
+
+
+    input_ids_list,token_type_ids_list,attention_mask_list = convert_example_to_feature(text)#转化文档变成bert_模型需要输入的格式
+
+    text_data_train = (input_ids_list, attention_mask_list, token_type_ids_list, text_label).map(map_example_to_dict)
+
+    model = TFBertModel.from_pretrained('bert-base-uncased',config = model_config)
+
+    bert_output = model(text_data_train)[0]
+
+
+
+
+#text_label,image_label,id_use =  get_label(label_path)
+#convert_text_label , convert_image_label , id_use = convert_label(text_label,image_label,id_use)
+#print(convert_text_label)
+
+
+
+
+
     
 
         

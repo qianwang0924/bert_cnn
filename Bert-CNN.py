@@ -1,20 +1,25 @@
 import tensorflow as tf
+import time
 from transformers import BertTokenizer #该类实现数据的token化
 from transformers import TFBertModel
 from transformers import BartConfig
+import scipy.misc
 import os
 import pandas as pd
 import numpy as np
+from glob import glob
 from PIL import Image
 from PIL import ImageFile
 
 
-max_sentence_length = 128 #定义句子最大的长度
 label_path = 'D:\code\\bert\word_data2\labelResultAll.txt'
 img_dir_path = 'D:\code\\bert\word_data2\data\pic'
 text_dir_path = 'D:\code\\bert\word_data2\data'
+max_length = 120
 number_of_epochs = 8 #训练循环次数
 learning_rate = 2e-5 #学习率
+batch_size = 50 #一次输入的数量
+epochs = 5#循环多少轮
 
 
 def get_bert_input_V1(test_sentence,max_sentence_length):
@@ -53,10 +58,10 @@ def get_bert_input_V1(test_sentence,max_sentence_length):
     print(bert_input)
     return(bert_input)
 
-def get_bert_input_V2(sentence,max_sentence_length):
+def get_bert_input_V2(sentence):
     tokenizer = BertTokenizer.from_pretrained('bert-base-chinese')#加载bert实现序列化预训练模型
     bert_input = tokenizer.encode_plus(sentence,add_special_tokens = True,#增加句子的前后缀
-                            max_length = max_sentence_length,#定义句子的最大长度
+                            max_length=max_length,
                             pad_to_max_length = True,#是否填充到一致长度
                             return_attention_mask = True)#实现attention_mask
     #print(bert_input)
@@ -134,6 +139,7 @@ def get_label(label_path):
         text_label.append(t[k][0])
 
    # print(text_label)
+    print('获取标签成功')
 
     return text_label,image_label,id_use
 
@@ -189,9 +195,11 @@ def convert_example_to_feature(text):
     input_ids_list = []
     token_type_ids_list = []
     attention_mask_list = []
+    counter = 0
 
     for sentence in text:
-        bert_input = get_bert_input_V2(sentence,max_sentence_length)
+        bert_input = get_bert_input_V2(sentence)
+        
         input_ids_list.append(bert_input['input_ids'])
         token_type_ids_list.append(bert_input['token_type_ids'])
         attention_mask_list.append(bert_input['attention_mask'])
@@ -199,12 +207,12 @@ def convert_example_to_feature(text):
 
 
 
-def map_example_to_dict(input_ids, attention_masks, token_type_ids, label):
+def map_example_to_dict(input_ids, attention_masks, token_type_ids):
     return {
       "input_ids": input_ids,
       "token_type_ids": token_type_ids,
       "attention_mask": attention_masks,
-  }, label
+  }
 
 
 
@@ -310,87 +318,86 @@ def cnn_model(input,keep_prob,bert_output):#keep_prob为dropout设置的参数�
 
     with tf.variable_scope('fully_connect_3'):#全连接层3实现50到3，实现情绪的分类
         linear3 = linear(tf.concat(linear2_drop,bert_output), name="linear3", n_out=3)
-        linear3_drop = tf.nn.dropout(linear3, keep_prob, name="linear3_drop")
 
     with tf.variable_scope('ouput'):
-        softmax = tf.nn.softmax(linear3_drop)
-
-    return(softmax)
-
-
-
-def run_benchmark():
-    with tf.compat.v1.Graph().as_default():
-        image_size = 224
-        pic_= tf.compat.v1.placeholder([batch_size,480,640,3], dtype=tf.float32,stddev=1e-1,name='real_images')
-
-        bert_output = tf.compat.v1.placeholder([batch_size,max_sentence_length,1], dtype=tf.float32,stddev=1e-1,name='real_text')
-
-        softmax = cnn_model(images, keep_prob,bert_output)
-
-        init = tf.global_variables_initializer()
-
-        config = tf.ConfigProto()
-        config.gpu_options.allocator_type = 'BFC'
-        sess = tf.Session(config=config)
-        sess.run(init)
-
-        time_tensorflow_run(sess, predictions, {keep_prob:1.0}, "Forward")
-
-        objective = tf.nn.l2_loss(fc8)
-        grad = tf.gradients(objective, p)
-        time_tensorflow_run(sess, grad, {keep_prob:0.5}, "Forward-backward")
+        softmax = tf.nn.softmax(linear3)
+        predictions = tf.argmax(softmax, 1)
+        return predictions, softmax, linear3
 
 
-def time_tensorflow_run(session, target, feed, info_string):
-    num_steps_burn_in = 10
-    total_duration = 0.0
-    total_duration_squared = 0.0
-    for i in range(num_batches + num_steps_burn_in):
-        start_time = time.time()
-        _ = session.run(target, feed_dict=feed)
-        duration = time.time() - start_time
-        if i >= num_steps_burn_in:
-            if not i % 10:
-                print ('%s: step %d, duration = %.3f' %
-                       (datetime.now(), i - num_steps_burn_in, duration))
-            total_duration += duration
-            total_duration_squared += duration * duration
-    mn = total_duration / num_batches
-    vr = total_duration_squared / num_batches - mn * mn
-    sd = math.sqrt(vr)
-    print ('%s: %s across %d steps, %.3f +/- %.3f sec / batch' %
-           (datetime.now(), info_string, num_batches, mn, sd))
 
-
-def bert_model(text,label):
-#配置模型#
-    model_config.output_hidden_states = True
-    model_config.output_attentions = True
-
-
-    text_label,image_label,id_use =  get_label(label_path)#得到文档标签，图像标签（没什么用），还有可以用的id
-    
-    img , text = get_train_data(img_dir_path,id_use,text_dir_path)#得到需要训练的文档，和图片
-
+def bert_model(text,text_label):
 
     input_ids_list,token_type_ids_list,attention_mask_list = convert_example_to_feature(text)#转化文档变成bert_模型需要输入的格式
+    input_ids_list = np.array(input_ids_list).astype(np.int64)
+    token_type_ids_list = np.array(token_type_ids_list).astype(np.int64)
+    attention_mask_list = np.array(attention_mask_list).astype(np.int64)
 
-    text_data_train = (input_ids_list, attention_mask_list, token_type_ids_list, text_label).map(map_example_to_dict)
+    print('转化完成')
 
-    model = TFBertModel.from_pretrained('bert-base-uncased',config = model_config)
+    text_data_train = map_example_to_dict(input_ids_list,token_type_ids_list,attention_mask_list)
+
+    model = TFBertModel.from_pretrained('bert-base-uncased')
 
     bert_output = model(text_data_train)[0]
 
+    return(bert_output)
 
 
+def run_benchmark(): 
 
-#text_label,image_label,id_use =  get_label(label_path)
-#convert_text_label , convert_image_label , id_use = convert_label(text_label,image_label,id_use)
-#print(convert_text_label)
+    text_label,image_label,id_use =  get_label(label_path)
+    text_label,image_label,id_use = convert_label(text_label,image_label,id_use)
+
+    img , text = get_train_data(img_dir_path,id_use,text_dir_path)#得到需要训练的文档，和图片
+    print('得到需要训练的文档，和图片')
+
+    pic_list= glob(os.path.join(img_dir_path,"*.jpg"))
+    print('读取图片列表完成')
+
+    tf.compat.v1.disable_eager_execution()
+
+    pic_= tf.compat.v1.placeholder(dtype=tf.float32,shape=[batch_size,480,640,3],name='real_images')
+    bert_output_ = tf.compat.v1.placeholder(dtype=tf.float32,shape=[batch_size,512],name='real_text')
+    label  = tf.compat.v1.placeholder(dtype=tf.float32,shape=[batch_size,3],name='label')
+
+    batch_idxs = len(pic_list)/batch_size
+
+    for epoch in range(0,epochs):
+
+        for idxs in range(0,int(batch_idxs)):
+
+            batch_files= pic_list[idxs*batch_size:(idxs +1)*batch_size]
+        
+            batch_img_files=[scipy.misc.imread(batch_file).astype(np.float) for batch_file in batch_files]
+            batch_images = np.array(batch_img_files).astype(np.float32)
+
+            batch_label_files = text_label[idxs*batch_size:(idxs +1)*batch_size]
+            batch_label = np.array(batch_label_files).astype(np.float32)
 
 
+            batch_text_files = text[idxs*batch_size:(idxs +1)*batch_size]
 
+            with tf.compat.v1.Graph().as_default():
+                predictions, softmax, linear3 = cnn_model(pic_,keep_prob,bert_output)
+
+                loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=softmax,labels=batch_label))
+
+                optim = tf.compat.v1.train.AdamOptimizer(learning_rate=learning_rate,beta1=beta1).minimize(loss)
+
+                print(tf.compat.v1.global_variables())
+
+                init = tf.compat.v1.global_variables_initializer()
+
+                config = tf.ConfigProto()
+                sess =  tf.compat.v1.Session(config=config)
+                sess.run(init)
+                batch_text = bert_model(batch_text_files,batch_label)
+                sess.run(batch_text.eval)
+                sess.run([optim,loss],feed_dict={pic_:batch_images,bert_output:batch_text,label:batch_label})
+                print('epoch: %.8f         ,loss: %8f      '%(epoch,loss))
+
+run_benchmark()
 
 
     

@@ -8,3 +8,5 @@
 2020/3/22
 完成了代码的调试，发现bert输出的向量如果融合cnn，在网络中cnn中代码初始化会殃及bert。bert的权重是预训练好的，打算用迁移学习的方法来实现训练。所以不能初始化。现在就是找到一种不能让bert初始化的方法。
  Error while reading resource variable tf_bert_model/bert/encoder/layer_._5/attention/self/value/kernel from Container: localhost. This could mean that the variable was uninitialized. Not found: Container localhost does not exist. (Could not find resource: localhost/tf_bert_model/bert/encoder/layer_._5/attention/self/value/kernel)
+2020/3/23
+发现用tensorflow太麻烦，且封装性太强，试试pytorch。制作了pytorch版本

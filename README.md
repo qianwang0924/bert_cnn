@@ -10,3 +10,5 @@
  Error while reading resource variable tf_bert_model/bert/encoder/layer_._5/attention/self/value/kernel from Container: localhost. This could mean that the variable was uninitialized. Not found: Container localhost does not exist. (Could not find resource: localhost/tf_bert_model/bert/encoder/layer_._5/attention/self/value/kernel)
 2020/3/23
 发现用tensorflow太麻烦，且封装性太强，试试pytorch。制作了pytorch版本
+2020/3/29
+实现模型，可以运行

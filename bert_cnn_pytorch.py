@@ -18,10 +18,12 @@ text_dir_path = 'D:\code\\bert\word_data2\data'
 max_length = 120
 number_of_epochs = 8 #训练循环次数
 learning_rate = 2e-5 #学习率
-batch_size = 50 #一次输入的数量
+batch_size = 10 #一次输入的数量
 epochs = 5#循环多少轮
 keep_prob = 0.5 
 beta1 = 0.5
+tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')#加载bert实现序列化预训练模型
+
 
 
 def get_bert_input_V1(test_sentence,max_sentence_length):
@@ -60,15 +62,12 @@ def get_bert_input_V1(test_sentence,max_sentence_length):
     print(bert_input)
     return(bert_input)
 
+
 def get_bert_input_V2(sentence):
-    tokenizer = BertTokenizer.from_pretrained('bert-base-chinese')#加载bert实现序列化预训练模型
-    bert_input = tokenizer.encode_plus(sentence,add_special_tokens = True,#增加句子的前后缀
-                            max_length=max_length,
-                            pad_to_max_length = True,#是否填充到一致长度
-                            return_attention_mask = True)#实现attention_mask
+    bert_input = tokenizer.encode(sentence,add_special_tokens = True,#增加句子的前后缀
+                            )
     #print(bert_input)
     return bert_input
-
 
 
 ###########################################数据集处理模块################################################
@@ -90,7 +89,7 @@ def resize_image(id_use):
             img = img.convert('RGB')
         if img.mode == "RGBA":
             img = img.convert('RGB')
-        img = img.resize((640, 480), Image.ANTIALIAS)
+        img = img.resize((224, 224), Image.ANTIALIAS)
         img.save(os.path.join(output_dir, file +'.jpg'))
 
     print('图片输出完成')
@@ -152,18 +151,18 @@ def convert_label(text_label,image_label,id_use):
     convert_image_label=[]
     for i in text_label:
         if i == 'positive':
-            convert_text_label.append([1,0,0])
+            convert_text_label.append(0)
         elif i == 'neutral':
-            convert_text_label.append([0,1,0])
+            convert_text_label.append(1)
         elif i == 'negative':
-            convert_text_label.append([0,0,1])
+            convert_text_label.append(2)
     for j in image_label:
         if j == 'positive':
-            convert_image_label.append([1,0,0])
+            convert_image_label.append(0)
         elif j == 'neutral':
-            convert_image_label.append([0,1,0])
+            convert_image_label.append(1)
         elif j == 'negative':
-           convert_image_label.append([0,0,1])
+           convert_image_label.append(2)
 
     #print(convert_image_label[1:10])
    # print(convert_text_label[1:10])
@@ -172,7 +171,7 @@ def convert_label(text_label,image_label,id_use):
     
 
 
-def get_train_data(img_dir_path,id_use,text_dir_path):
+def get_train_data(id_use,text_dir_path):
     text = []
     image = []
 
@@ -184,58 +183,27 @@ def get_train_data(img_dir_path,id_use,text_dir_path):
         text.append(info.readline())#使用readline函数得到一条一条的信息，如果使用read获取全部信息亦可；
         info.close()
 
-    for id in id_use:
-        id = id + '.jpg'
-        domain = os.path.abspath(img_dir_path)#获取文件夹的路径
 
-        info = os.path.join(domain,id)#将路径与文件名结合起来就是每个文件的完整路径
-        img = np.array(Image.open(info))#读取图片内容
-        image.append(img)
-    return image,text #text是一个文字数组，image是np存储的数组
+    return text #text是一个文字数组
 
 def convert_example_to_feature(text):
-    input_ids_list = []
-    token_type_ids_list = []
-    attention_mask_list = []
-    counter = 0
-
+    bert_input=[]
     for sentence in text:
-        bert_input = get_bert_input_V2(sentence)
-        
-        input_ids_list.append(bert_input['input_ids'])
-        token_type_ids_list.append(bert_input['token_type_ids'])
-        attention_mask_list.append(bert_input['attention_mask'])
-    return input_ids_list,token_type_ids_list,attention_mask_list
-
-
-
-def map_example_to_dict(input_ids, attention_masks, token_type_ids):
-    return {
-      "input_ids": input_ids,
-      "token_type_ids": token_type_ids,
-      "attention_mask": attention_masks,
-  }
-
-
+        bert_input.append(get_bert_input_V2(sentence))
+    return bert_input
 
 
 def bert_model(text,text_label):
-
-    input_ids_list,token_type_ids_list,attention_mask_list = convert_example_to_feature(text)#转化文档变成bert_模型需要输入的格式
-    input_ids_list = np.array(input_ids_list).astype(np.int32)
-    token_type_ids_list = np.array(token_type_ids_list).astype(np.int32)
-    attention_mask_list = np.array(attention_mask_list).astype(np.int32)
-
-    print('转化完成')
-
-    text_data_train = map_example_to_dict(input_ids_list,token_type_ids_list,attention_mask_list)
-
-    model = BertModel.from_pretrained('bert-base-uncased')
-
-    bert_output = model(text_data_train)[1]
-    bert_output = bert_output.numpy()
-    print(bert_output)
-    return(bert_output)
+    np_bert=[]
+    bert = BertModel.from_pretrained(r'C:\Users\王佳明\Desktop')
+    input_ids_list= convert_example_to_feature(text)#转化文档变成bert_模型需要输入的格式
+    for i in input_ids_list:
+        #print('完成一个啦！')
+        i=torch.tensor([i])
+        bert_output = bert(i)[1]
+        bert_output = bert_output.detach().numpy()
+        np_bert.append(bert_output)
+    return(np_bert)
 
 class VGG16(nn.Module):
    
@@ -265,7 +233,9 @@ class VGG16(nn.Module):
         self.conv5_3 = nn.Conv2d(512, 512, 3, padding=(1, 1)) # 512 * 12 * 12
         self.maxpool5 = nn.MaxPool2d((2, 2), padding=(1, 1)) # pooling 512 * 7 * 7
 
-        self.GAP = nn.AvgPool2d(kernel_size=[7,7],stride=[1,1,1,1])
+        self.GAP = nn.AvgPool2d([7,7])
+        self.relu = nn.ReLU(inplace=True)
+        self.softmax = nn.Softmax(dim=1)
 
         self.linear_3= nn.Linear(512,100)
         self.linear_4= nn.Linear(100,50)
@@ -275,61 +245,74 @@ class VGG16(nn.Module):
         self.linear_5 = nn.Linear(50,3)
 
     def forward(self,image,text):
-        in_size = image.size(0)
         out = self.conv1_1(image)
-        out = F.relu(out)
+        out = self.relu(out)
         out = self.conv1_2(out) # 222
-        out = F.relu(out)
+        out = self.relu(out)
         out = self.maxpool1(out) # 112
         
         out = self.conv2_1(out) # 110
-        out = F.relu(out)
+        out = self.relu(out)
         out = self.conv2_2(out) # 110
-        out = F.relu(out)
+        out = self.relu(out)
         out = self.maxpool2(out) # 56
+
         
         out = self.conv3_1(out) # 54
-        out = F.relu(out)
+        out = self.relu(out)
         out = self.conv3_2(out) # 54
-        out = F.relu(out)
+        out = self.relu(out)
         out = self.conv3_3(out) # 54
-        out = F.relu(out)
+        out = self.relu(out)
         out = self.maxpool3(out) # 28
         
         out = self.conv4_1(out) # 26
-        out = F.relu(out)
+        out = self.relu(out)
         out = self.conv4_2(out) # 26
-        out = F.relu(out)
+        out = self.relu(out)
         out = self.conv4_3(out) # 26
-        out = F.relu(out)
+        out = self.relu(out)
         out = self.maxpool4(out) # 14
         
         out = self.conv5_1(out) # 12
-        out = F.relu(out)
+        out = self.relu(out)
         out = self.conv5_2(out) # 12
-        out = F.relu(out)
+        out = self.relu(out)
         out = self.conv5_3(out) # 12
-        out = F.relu(out)
+        out = self.relu(out)
         out = self.maxpool5(out) # 7
         out = self.GAP(out)
-        out = F.relu(out)
+        out = out.squeeze()
+       # print(out.shape)
+        out = self.relu(out)
         out = self.linear_3(out)
-        out = F.relu(out)
+        out = self.relu(out)
+       # print(out.shape)
         
         out_1 = self.linear_1(text)
-        out_1 = F.relu(out_1)
+        out_1 = self.relu(out_1)
+        out_1 = out_1.squeeze()
+       # print(out_1.shape)
+       
         out = out + out_1
-        out = F.relu(out)
+        out = self.relu(out)
+       # print(out.shape)
         out = self.linear_4(out)
-        out = F.relu(out)
+        out = self.relu(out)
         out_2 = self.linear_2(text)
-        out_2 = F.relu(out_2)
+        #print(out.shape)
+        out_2 = self.relu(out_2)
+        out_2 = out_2.squeeze()
         out = out + out_2
+        #print(out.shape)
         out = self.linear_5(out)
-        out = F.log_softmax(out, dim=1)
+        #print(out.shape)
+        out = self.softmax(out)
         return out
 
+
 model = VGG16()
+print(model)
 loss_function = nn.CrossEntropyLoss()
 opt = torch.optim.Adam(model.parameters(),lr=0.001)
 
@@ -337,9 +320,9 @@ opt = torch.optim.Adam(model.parameters(),lr=0.001)
 def train():
     text_label,image_label,id_use =  get_label(label_path)
     text_label,image_label,id_use = convert_label(text_label,image_label,id_use)
-
-    img , text = get_train_data(img_dir_path,id_use,text_dir_path)#得到需要训练的文档，和图片
+    text = get_train_data(id_use,text_dir_path)#得到需要训练的文档，和图片
     print('得到需要训练的文档，和图片')
+
 
     pic_list= glob(os.path.join(img_dir_path,"*.jpg"))
     print('读取图片列表完成')
@@ -351,30 +334,29 @@ def train():
             batch_files= pic_list[idxs*batch_size:(idxs +1)*batch_size]
         
             batch_img_files=[scipy.misc.imread(batch_file).astype(np.float) for batch_file in batch_files]
-            batch_images = np.array(batch_img_files).astype(np.float32)
+            batch_img_files= np.transpose(batch_img_files, (0,3,1,2))#在pytorch输入的图片格式是batchsize，channel，size，size形式,tensorflow是batchsize，size，size，channel
+            batch_images= torch.tensor(batch_img_files,dtype=torch.float32)#要转成float32
 
             batch_label_files = text_label[idxs*batch_size:(idxs +1)*batch_size]
-            batch_label = np.array(batch_label_files).astype(np.float32)
+            batch_label = torch.tensor(batch_label_files)
+            batch_label= batch_label.squeeze()
+        
             batch_text_files = text[idxs*batch_size:(idxs +1)*batch_size]
-            
+
             batch_output = bert_model(batch_text_files,batch_label)
-            
-            softmax = model(batch_output,batch_images)
-            loss= loss_function(softmax,batch_label)
+            batch_output = torch.tensor(batch_output)#转化为tensor
+            #print(batch_output)
+
+            softmax = model(batch_images,batch_output)
+           # print(softmax.shape)
+            loss= loss_function(softmax,batch_label)#使用nn.CrossEntropyLoss时，label必须是[0, #classes] 区间的一个数字 ，而不可以是one-hot encoded 目标向量,例如1，2，3
+
             opt.zero_grad() 
             loss.backward()
             opt.step()
+            print('echo:'+str(epoch)+'         '+'当前的loss值为：'+str(loss.detach().numpy()))
 
 train()
-
-
-            
-
-
-
-
-
-    
 
 
 
